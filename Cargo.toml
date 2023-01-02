@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 async-stripe = { version = "0.14", features = ["runtime-tokio-hyper"] }
+my_macros = {path="../my_macros"}

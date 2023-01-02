@@ -6,8 +6,12 @@ use stripe::{
 use stripe::{CreatePaymentIntent, CustomerId};
 
 pub use stripe::CreatePaymentIntentShipping;
+pub use stripe::CreatePaymentIntentShippingAddress;
 
+use my_macros::make_error;
 pub use stripe::Client;
+
+make_error!(StripePaymentError);
 
 pub struct CreatePaymentIntentDto {
     pub amount: i64,
@@ -50,9 +54,9 @@ pub async fn get_customer(
 pub async fn create_customer(
     stripe_client: &Client,
     dto: &CreateCustomerDto,
-) -> Result<CustomerDto, StripeError> {
+) -> Result<CustomerDto, StripePaymentError> {
     let mut meta = HashMap::<String, String>::new();
-    meta.insert("id".to_string(), dto.id.clone()).unwrap();
+    meta.insert("id".to_string(), dto.id.clone());
     Customer::create(
         &stripe_client,
         CreateCustomer {
@@ -84,14 +88,15 @@ pub async fn create_customer(
     .map(|x| CustomerDto {
         id: x.id.to_string(),
     })
+    .map_err(StripePaymentError::from_general)
 }
 
 pub async fn create_payment_sheet(
     stripe_client: &Client,
     dto: &CreatePaymentIntentDto,
-) -> Result<PaymentIntentDto, StripeError> {
+) -> Result<PaymentIntentDto, StripePaymentError> {
     let stripe_customer_id = CustomerId::from_str(dto.stripe_customer_id.as_str())
-        .map_err(|x| StripeError::ClientError(x.to_string()))?;
+        .map_err(|x| StripePaymentError::from_general(x.to_string()))?;
     let ephemeral_key = EphemeralKey::create(
         &stripe_client,
         CreateEphemeralKey {
@@ -100,10 +105,14 @@ pub async fn create_payment_sheet(
             issuing_card: None,
         },
     )
-    .await?;
-    let ephemeral_key_secret = ephemeral_key.secret.ok_or(StripeError::ClientError(
-        "no ephemeral_key_secret".to_string(),
-    ))?;
+    .await
+    .map_err(StripePaymentError::from_general)?;
+    let ephemeral_key_secret = ephemeral_key
+        .secret
+        .ok_or(StripePaymentError::from_general(
+            "no ephemeral_key_secret".to_string(),
+        ))?;
+
     let payment_intent = PaymentIntent::create(
         &stripe_client,
         CreatePaymentIntent {
@@ -113,8 +122,8 @@ pub async fn create_payment_sheet(
             capture_method: None,
             confirm: None,
             confirmation_method: None,
-            currency: stripe::Currency::from_str(dto.currency.as_str())
-                .map_err(|x| StripeError::ClientError(x.to_string()))?,
+            currency: stripe::Currency::from_str(dto.currency.to_lowercase().as_str())
+                .map_err(|x| StripePaymentError::from_general(x.to_string()))?,
             customer: Some(stripe_customer_id),
             description: None,
             error_on_requires_action: None,
@@ -139,13 +148,15 @@ pub async fn create_payment_sheet(
             use_stripe_sdk: None,
         },
     )
-    .await?;
+    .await
+    .map_err(StripePaymentError::from_general)?;
 
-    let payment_client_secret = payment_intent
-        .client_secret
-        .ok_or(StripeError::ClientError(
-            "no payment_client_secret".to_string(),
-        ))?;
+    let payment_client_secret =
+        payment_intent
+            .client_secret
+            .ok_or(StripePaymentError::from_general(
+                "no payment_client_secret".to_string(),
+            ))?;
 
     Ok(PaymentIntentDto {
         id: payment_intent.id.to_string(),
