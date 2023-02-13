@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
 use stripe::{
     CreateCustomer, CreateEphemeralKey, Customer, EphemeralKey, PaymentIntent, StripeError,
@@ -13,6 +14,7 @@ pub use stripe::Client;
 
 make_error!(StripePaymentError);
 
+#[derive(Debug)]
 pub struct CreatePaymentIntentDto {
     pub amount: i64,
     pub stripe_customer_id: String,
@@ -20,6 +22,7 @@ pub struct CreatePaymentIntentDto {
     pub currency: String,
 }
 
+#[derive(Debug)]
 pub struct PaymentIntentDto {
     pub id: String,
     pub ephemeral_secret: String,
@@ -27,14 +30,17 @@ pub struct PaymentIntentDto {
     pub stripe_customer_id: String,
 }
 
+#[derive(Debug)]
 pub struct CreateCustomerDto {
     pub id: String,
 }
 
+#[derive(Debug)]
 pub struct CustomerDto {
     pub id: String,
 }
 
+#[tracing::instrument(skip(stripe_client))]
 pub async fn get_customer(
     stripe_client: &stripe::Client,
     account_id: String,
@@ -51,6 +57,7 @@ pub async fn get_customer(
         })
 }
 
+#[tracing::instrument(skip(stripe_client))]
 pub async fn create_customer(
     stripe_client: &Client,
     dto: &CreateCustomerDto,
@@ -91,10 +98,12 @@ pub async fn create_customer(
     .map_err(StripePaymentError::from_general)
 }
 
+#[tracing::instrument(skip(stripe_client))]
 pub async fn create_payment_sheet(
     stripe_client: &Client,
     dto: &CreatePaymentIntentDto,
 ) -> Result<PaymentIntentDto, StripePaymentError> {
+    tracing::debug!("creating payment request");
     let stripe_customer_id = CustomerId::from_str(dto.stripe_customer_id.as_str())
         .map_err(|x| StripePaymentError::from_general(x.to_string()))?;
     let ephemeral_key = EphemeralKey::create(
@@ -112,6 +121,10 @@ pub async fn create_payment_sheet(
         .ok_or(StripePaymentError::from_general(
             "no ephemeral_key_secret".to_string(),
         ))?;
+    tracing::debug!(
+        "creating payment request stage 2 {:?}",
+        dto.delivery_address.clone()
+    );
 
     let payment_intent = PaymentIntent::create(
         &stripe_client,
